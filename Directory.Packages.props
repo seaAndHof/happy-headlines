@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Dapper" Version="2.1.89" />
+    <!-- MassTransit 9 is commercially licensed; 8.x is the last Apache-2.0 release line. -->
+    <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.11" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <PackageVersion Include="prometheus-net.AspNetCore" Version="8.2.1" />
+    <PackageVersion Include="StackExchange.Redis" Version="3.3.1" />
+  </ItemGroup>
+</Project>

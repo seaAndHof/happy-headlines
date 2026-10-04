@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The messages the services exchange, and the cache metrics both caches report. -->
+  <ItemGroup>
+    <PackageReference Include="prometheus-net.AspNetCore" />
+  </ItemGroup>
+</Project>

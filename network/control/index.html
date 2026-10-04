@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transatlantic link</title>
+  <style>
+    :root {
+      --bg: #f4f6f9; --panel: #ffffff; --text: #1b2230; --muted: #687188; --border: #e1e5ec;
+      --track: #dde2ea; --accent: #2f7ff0; --cut: #e5484d; --hit: #2e9e65;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #10131a; --panel: #19202b; --text: #e7eaf0; --muted: #98a2b6; --border: #2a3140;
+        --track: #2c3443; --accent: #5ea3ff; --cut: #ff6369; --hit: #3dd68c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 18px/1.4 system-ui, sans-serif; }
+    main { max-width: 1000px; margin: 0 auto; padding: 32px 16px; display: grid; gap: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; }
+    .link .top { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; }
+    .value { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .is-cut .value { color: var(--cut); }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 56px; margin: 0;
+                        background: transparent; cursor: pointer; }
+    input[type=range]::-webkit-slider-runnable-track { height: 14px; border-radius: 7px; background: var(--track); }
+    input[type=range]::-moz-range-track { height: 14px; border-radius: 7px; background: var(--track); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 40px; height: 40px; margin-top: -13px;
+                                              border-radius: 50%; background: var(--accent); border: 4px solid var(--panel); }
+    input[type=range]::-moz-range-thumb { width: 32px; height: 32px; border-radius: 50%; background: var(--accent);
+                                          border: 4px solid var(--panel); }
+    .is-cut input[type=range]::-webkit-slider-thumb { background: var(--cut); }
+    .is-cut input[type=range]::-moz-range-thumb { background: var(--cut); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 10px 8px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 500; font-size: 15px; }
+    td { font-size: 30px; font-weight: 700; }
+    td:first-child { font-size: 18px; }
+    .hit { color: var(--hit); }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card link" data-proxy="article-db" data-label="Articles">
+    <div class="top"><span>Articles</span><span class="value">–</span></div>
+    <input type="range" min="0" max="2100" step="50" aria-label="Article database latency">
+  </div>
+  <div class="card link" data-proxy="comment-db" data-label="Comments">
+    <div class="top"><span>Comments</span><span class="value">–</span></div>
+    <input type="range" min="0" max="2100" step="50" aria-label="Comment database latency">
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th></th><th>Cache hit</th><th>Cache miss</th><th>Hit ratio</th></tr></thead>
+      <tbody>
+        <tr data-cache="article"><td>ArticleCache</td><td class="hit">–</td><td>–</td><td>–</td></tr>
+        <tr data-cache="comment"><td>CommentCache</td><td class="hit">–</td><td>–</td><td>–</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const CUT = 2100;
+
+  const post = (url, body) => fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+  });
+
+  const mark = text =>
+    post("/grafana/api/annotations", { dashboardUID: "happyheadlines-caching", text }).catch(() => {});
+
+  function render(card, position) {
+    card.classList.toggle("is-cut", position >= CUT);
+    card.querySelector(".value").textContent = position >= CUT ? "cut" : `${position} ms`;
+  }
+
+  async function loadLinks() {
+    const proxies = await fetch("/toxiproxy/proxies").then(r => r.json());
+    for (const card of document.querySelectorAll(".link")) {
+      const slider = card.querySelector("input");
+      if (document.activeElement === slider) continue;
+      const proxy = proxies[card.dataset.proxy];
+      const latency = proxy.toxics.find(t => t.name === "distance")?.attributes.latency ?? 0;
+      slider.value = proxy.enabled ? latency : CUT;
+      card.dataset.enabled = proxy.enabled;
+      render(card, +slider.value);
+    }
+  }
+
+  for (const card of document.querySelectorAll(".link")) {
+    const { proxy, label } = card.dataset;
+    const slider = card.querySelector("input");
+
+    slider.addEventListener("input", () => render(card, +slider.value));
+    slider.addEventListener("change", async () => {
+      const position = +slider.value;
+      if (position >= CUT) {
+        await post(`/toxiproxy/proxies/${proxy}`, { enabled: false });
+        mark(`${label}: link cut`);
+      } else {
+        await post(`/toxiproxy/proxies/${proxy}/toxics/distance`, { attributes: { latency: position } });
+        if (card.dataset.enabled === "false") await post(`/toxiproxy/proxies/${proxy}`, { enabled: true });
+        mark(`${label}: ${position} ms`);
+      }
+      slider.blur();
+      loadLinks();
+    });
+  }
+
+  const query = q => fetch(`/prometheus/api/v1/query?query=${encodeURIComponent(q)}`)
+    .then(r => r.json()).then(j => j.data.result);
+
+  const ms = seconds => isFinite(seconds) ? `${(seconds * 1000).toFixed(seconds < 0.01 ? 1 : 0)} ms` : "–";
+
+  async function loadStats() {
+    const [times, ratios] = await Promise.all([
+      query('sum by (cache, result) (rate(hh_cache_lookup_duration_seconds_sum[15s])) / sum by (cache, result) (rate(hh_cache_lookup_duration_seconds_count[15s]))'),
+      query('sum by (cache) (rate(hh_cache_lookups_total{result="hit"}[15s])) / sum by (cache) (rate(hh_cache_lookups_total[15s]))')
+    ]);
+    for (const row of document.querySelectorAll("tr[data-cache]")) {
+      const cache = row.dataset.cache;
+      const time = result => +times.find(s => s.metric.cache === cache && s.metric.result === result)?.value[1];
+      const ratio = +ratios.find(s => s.metric.cache === cache)?.value[1];
+      const cells = row.querySelectorAll("td");
+      cells[1].textContent = ms(time("hit"));
+      cells[2].textContent = ms(time("miss"));
+      cells[3].textContent = isFinite(ratio) ? `${Math.round(ratio * 100)}%` : "–";
+    }
+  }
+
+  loadLinks();
+  loadStats();
+  setInterval(loadLinks, 2000);
+  setInterval(loadStats, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+# HappyHeadlines: the part of the system needed for compulsory assignment 1 (caching).
+# Start everything:  docker compose up --build
+name: happyheadlines
+
+x-postgres-health: &postgres-health
+  # TCP check: during first-time setup Postgres only listens on a local socket, so this waits for the seed data.
+  test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U happy"]
+  interval: 2s
+  retries: 30
+
+x-redis-health: &redis-health
+  test: ["CMD", "redis-cli", "ping"]
+  interval: 2s
+  retries: 30
+
+services:
+  # --- Articles ---------------------------------------------------------------------------------
+
+  article-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: happy
+      POSTGRES_PASSWORD: headlines
+      POSTGRES_DB: articles
+    volumes:
+      - ./db/article-db.sql:/docker-entrypoint-initdb.d/article-db.sql:ro
+    healthcheck: *postgres-health
+    labels:
+      happyheadlines.c4: ArticleDatabase
+      happyheadlines.description: "PostgreSQL: the global article database, in North America"
+
+  article-cache:
+    image: redis:8-alpine
+    healthcheck: *redis-health
+    labels:
+      happyheadlines.c4: ArticleCache
+      happyheadlines.description: "Redis: articles from the last 14 days, filled by article-cache-warmer"
+
+  article-service:
+    build: { context: ., args: { SERVICE: ArticleService } }
+    image: happyheadlines/article-service
+    deploy:
+      replicas: 3
+    environment:
+      ArticleDatabase: Host=transatlantic-link;Port=5432;Database=articles;Username=happy;Password=headlines;GSS Encryption Mode=Disable
+      ArticleCache: article-cache:6379
+      RabbitMq: rabbitmq
+    depends_on:
+      transatlantic-link-setup: { condition: service_completed_successfully }
+      article-cache: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: ArticleService
+      happyheadlines.description: ".NET: answers GetArticle from the ArticleCache, or the database on a miss (3 replicas)"
+
+  article-cache-warmer:
+    build: { context: ., args: { SERVICE: ArticleCacheWarmer } }
+    image: happyheadlines/article-cache-warmer
+    environment:
+      ArticleDatabase: Host=transatlantic-link;Port=5432;Database=articles;Username=happy;Password=headlines;GSS Encryption Mode=Disable
+      ArticleCache: article-cache:6379
+      RefreshInterval: "00:01:00"
+    depends_on:
+      transatlantic-link-setup: { condition: service_completed_successfully }
+      article-cache: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: ArticleCache (offline process)
+      happyheadlines.description: ".NET: copies the last 14 days of articles into the ArticleCache every minute"
+
+  # --- Comments ---------------------------------------------------------------------------------
+
+  comment-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: happy
+      POSTGRES_PASSWORD: headlines
+      POSTGRES_DB: comments
+    volumes:
+      - ./db/comment-db.sql:/docker-entrypoint-initdb.d/comment-db.sql:ro
+    healthcheck: *postgres-health
+    labels:
+      happyheadlines.c4: CommentDatabase
+      happyheadlines.description: "PostgreSQL: all comments, in North America"
+
+  comment-cache:
+    image: redis:8-alpine
+    healthcheck: *redis-health
+    labels:
+      happyheadlines.c4: CommentCache
+      happyheadlines.description: "Redis: comments of the 30 most recently read articles, filled on a cache miss"
+
+  comment-service:
+    build: { context: ., args: { SERVICE: CommentService } }
+    image: happyheadlines/comment-service
+    deploy:
+      replicas: 2
+    environment:
+      CommentDatabase: Host=transatlantic-link;Port=5433;Database=comments;Username=happy;Password=headlines;GSS Encryption Mode=Disable
+      CommentCache: comment-cache:6379
+      CommentCacheMaxArticles: "30"
+      RabbitMq: rabbitmq
+    depends_on:
+      transatlantic-link-setup: { condition: service_completed_successfully }
+      comment-cache: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: CommentService
+      happyheadlines.description: ".NET: answers GetComments from the CommentCache, and stores posted comments (2 replicas)"
+
+  # --- Europe <-> North America -----------------------------------------------------------------
+
+  transatlantic-link:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    ports:
+      - "8474:8474" # Toxiproxy API: change the latency or cut the link during the demo (see README)
+    labels:
+      happyheadlines.c4: Network (simulated)
+      happyheadlines.description: "Toxiproxy: the services in Europe reach the databases in North America through it, +100 ms"
+
+  transatlantic-link-setup:
+    image: curlimages/curl:latest
+    entrypoint: ["sh", "/transatlantic-link.sh"]
+    volumes:
+      - ./network/transatlantic-link.sh:/transatlantic-link.sh:ro
+    depends_on:
+      transatlantic-link: { condition: service_started }
+      article-db: { condition: service_healthy }
+      comment-db: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: Network (simulated)
+      happyheadlines.description: "One-shot: creates the article-db and comment-db links with 100 ms latency, then exits"
+
+  transatlantic-control:
+    image: nginx:alpine
+    ports:
+      - "8475:80" # control panel: http://localhost:8475
+    volumes:
+      - ./network/control/index.html:/usr/share/nginx/html/index.html:ro
+      - ./network/control/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - transatlantic-link
+      - prometheus
+      - grafana
+    labels:
+      happyheadlines.c4: Network (simulated)
+      happyheadlines.description: "Control panel: change the transatlantic link's latency or cut it, and watch hit and miss times"
+
+  # --- Messaging and traffic --------------------------------------------------------------------
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "15673:15672" # management UI: http://localhost:15673 (guest / guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 30
+    labels:
+      happyheadlines.c4: Message broker
+      happyheadlines.description: "RabbitMQ: carries the MassTransit messages between the services"
+
+  reader-simulator:
+    build: { context: ., args: { SERVICE: ReaderSimulator } }
+    image: happyheadlines/reader-simulator
+    environment:
+      RabbitMq: rabbitmq
+      Readers: "5"
+    depends_on:
+      article-service: { condition: service_started }
+      comment-service: { condition: service_started }
+    labels:
+      happyheadlines.c4: Website (simulated)
+      happyheadlines.description: ".NET: simulated readers requesting articles and comments, and posting comments"
+
+  # --- Monitoring -------------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090" # http://localhost:9091
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    labels:
+      happyheadlines.c4: Monitoring
+      happyheadlines.description: "Prometheus: scrapes the cache metrics from every service replica"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3030:3000" # dashboard: http://localhost:3030
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/caching.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    labels:
+      happyheadlines.c4: Monitoring
+      happyheadlines.description: "Grafana: the cache hit ratio dashboard"
+
+  database-viewer:
+    image: dbgate/dbgate:7.3.1-alpine
+    ports:
+      - "8085:3000" # http://localhost:8085
+    environment:
+      USAGE_ANALYTICS: "false"
+      CONNECTIONS: articledb,articlecache,commentdb,commentcache
+      LABEL_articledb: ArticleDatabase
+      ENGINE_articledb: postgres@dbgate-plugin-postgres
+      SERVER_articledb: article-db
+      PORT_articledb: "5432"
+      USER_articledb: happy
+      PASSWORD_articledb: headlines
+      DATABASE_articledb: articles
+      READONLY_articledb: "true"
+      LABEL_articlecache: ArticleCache
+      ENGINE_articlecache: redis@dbgate-plugin-redis
+      SERVER_articlecache: article-cache
+      PORT_articlecache: "6379"
+      DATABASE_articlecache: db0
+      READONLY_articlecache: "true"
+      LABEL_commentdb: CommentDatabase
+      ENGINE_commentdb: postgres@dbgate-plugin-postgres
+      SERVER_commentdb: comment-db
+      PORT_commentdb: "5432"
+      USER_commentdb: happy
+      PASSWORD_commentdb: headlines
+      DATABASE_commentdb: comments
+      READONLY_commentdb: "true"
+      LABEL_commentcache: CommentCache
+      ENGINE_commentcache: redis@dbgate-plugin-redis
+      SERVER_commentcache: comment-cache
+      PORT_commentcache: "6379"
+      DATABASE_commentcache: db0
+      READONLY_commentcache: "true"
+    depends_on:
+      - article-db
+      - comment-db
+      - article-cache
+      - comment-cache
+    labels:
+      happyheadlines.c4: Monitoring
+      happyheadlines.description: "DbGate: browse the two databases and the two caches in the browser (read-only)"

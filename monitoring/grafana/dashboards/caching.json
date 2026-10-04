@@ -1,0 +1,133 @@
+{
+  "uid": "happyheadlines-caching",
+  "title": "HappyHeadlines caching",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "builtIn": 1,
+        "type": "dashboard",
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(255, 96, 96, 1)"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "ArticleCache hit ratio (last minute)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hh_cache_lookups_total{cache=\"article\",result=\"hit\"}[1m])) / sum(rate(hh_cache_lookups_total{cache=\"article\"}[1m]))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "CommentCache hit ratio (last minute)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hh_cache_lookups_total{cache=\"comment\",result=\"hit\"}[1m])) / sum(rate(hh_cache_lookups_total{cache=\"comment\"}[1m]))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 3,
+      "type": "bargauge",
+      "title": "Average time to answer: cache hit vs miss (a miss includes the database read)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache, result) (rate(hh_cache_lookup_duration_seconds_sum[1m])) / sum by (cache, result) (rate(hh_cache_lookup_duration_seconds_count[1m]))",
+          "legendFormat": "{{cache}} {{result}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3, "min": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "displayMode": "basic" }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Hit ratio over time",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache) (rate(hh_cache_lookups_total{result=\"hit\"}[1m])) / sum by (cache) (rate(hh_cache_lookups_total[1m]))",
+          "legendFormat": "{{cache}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Lookups per second: hits and misses",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache, result) (rate(hh_cache_lookups_total[1m]))",
+          "legendFormat": "{{cache}} {{result}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "CommentCache: articles cached (max 30) and evictions per second",
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(hh_cache_entries{cache=\"comment\"})",
+          "legendFormat": "articles cached"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(hh_cache_evictions_total{cache=\"comment\"}[1m]))",
+          "legendFormat": "evictions per second"
+        }
+      ],
+      "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "ArticleCache lookups per ArticleService replica (all three share one cache)",
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(hh_cache_lookups_total{cache=\"article\"}[1m]))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] }
+    }
+  ]
+}
