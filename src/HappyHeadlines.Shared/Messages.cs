@@ -4,9 +4,6 @@ public record Article(int Id, string Title, string Content, DateTime PublishedAt
 
 public record Comment(int Id, int ArticleId, string Author, string Body, DateTime CreatedAt);
 
-public record GetArticle(int ArticleId);
-public record ArticleResponse(Article? Article, bool CacheHit);
-
 public record GetComments(int ArticleId);
 public record CommentsResponse(List<Comment> Comments, bool CacheHit);
 
