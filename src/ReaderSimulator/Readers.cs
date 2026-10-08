@@ -1,17 +1,20 @@
+using System.Net.Http.Json;
 using HappyHeadlines.Shared;
-using MassTransit;
 
 namespace ReaderSimulator;
 
-public class Readers(IBus bus, IHttpClientFactory http, IConfiguration config, ILogger<Readers> logger) : BackgroundService
+public class Readers(IHttpClientFactory http, IConfiguration config, ILogger<Readers> logger) : BackgroundService
 {
+    private static readonly string[] CommentBodies =
+        ["What a lovely story!", "This made my day.", "Damn, that is good news!", "Only an idiot could dislike this."];
+
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
         Task.WhenAll(Enumerable.Range(0, config.GetValue<int>("Readers")).Select(_ => ReadAsync(stoppingToken)));
 
     private async Task ReadAsync(CancellationToken stoppingToken)
     {
         var articles = http.CreateClient("ArticleService");
-        var comments = bus.CreateRequestClient<GetComments>();
+        var comments = http.CreateClient("CommentService");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -20,12 +23,16 @@ public class Readers(IBus bus, IHttpClientFactory http, IConfiguration config, I
             try
             {
                 (await articles.GetAsync($"articles/global/{articleId}", stoppingToken)).EnsureSuccessStatusCode();
-                await comments.GetResponse<CommentsResponse>(new GetComments(articleId), stoppingToken);
+                (await comments.GetAsync($"comments/{articleId}", stoppingToken)).EnsureSuccessStatusCode();
 
                 if (Random.Shared.NextDouble() < 0.05)
-                    await bus.Publish(new PostComment(articleId, "Reader", "What a lovely story!"), stoppingToken);
+                {
+                    var body = CommentBodies[Random.Shared.Next(CommentBodies.Length)];
+                    (await comments.PostAsJsonAsync("comments", new NewComment(articleId, "Reader", body), stoppingToken))
+                        .EnsureSuccessStatusCode();
+                }
             }
-            catch (Exception e) when (e is HttpRequestException or RequestTimeoutException or RequestFaultException)
+            catch (HttpRequestException e)
             {
                 logger.LogWarning("Reading article {ArticleId} failed: {Reason}", articleId, e.Message);
             }

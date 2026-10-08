@@ -161,14 +161,40 @@ services:
       CommentDatabase: Host=transatlantic-link;Port=5433;Database=comments;Username=happy;Password=headlines;GSS Encryption Mode=Disable
       CommentCache: comment-cache:6379
       CommentCacheMaxArticles: "30"
-      RabbitMq: rabbitmq
+      ProfanityService: http://profanity-service:8080
     depends_on:
       transatlantic-link-setup: { condition: service_completed_successfully }
       comment-cache: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      profanity-service: { condition: service_started }
     labels:
       happyheadlines.c4: CommentService
-      happyheadlines.description: ".NET: answers GetComments from the CommentCache, and stores posted comments (2 replicas)"
+      happyheadlines.description: ".NET REST API: comments from the CommentCache or database; new comments pass the ProfanityService (2 replicas)"
+
+  # --- Profanity (its own swimlane) -------------------------------------------------------------
+
+  profanity-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: happy
+      POSTGRES_PASSWORD: headlines
+      POSTGRES_DB: profanity
+    volumes:
+      - ./db/profanity-db.sql:/docker-entrypoint-initdb.d/profanity-db.sql:ro
+    healthcheck: *postgres-health
+    labels:
+      happyheadlines.c4: ProfanityDatabase
+      happyheadlines.description: "PostgreSQL: the words the ProfanityService masks"
+
+  profanity-service:
+    build: { context: ., args: { SERVICE: ProfanityService } }
+    image: happyheadlines/profanity-service
+    environment:
+      ProfanityDatabase: Host=profanity-db;Database=profanity;Username=happy;Password=headlines;GSS Encryption Mode=Disable
+    depends_on:
+      profanity-db: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: ProfanityService
+      happyheadlines.description: ".NET REST API: masks profanity in a text"
 
   # --- Europe <-> North America -----------------------------------------------------------------
 
@@ -208,26 +234,14 @@ services:
       happyheadlines.c4: Network (simulated)
       happyheadlines.description: "Control panel: change the transatlantic link's latency or cut it, and watch hit and miss times"
 
-  # --- Messaging and traffic --------------------------------------------------------------------
-
-  rabbitmq:
-    image: rabbitmq:4-management-alpine
-    ports:
-      - "15673:15672" # management UI: http://localhost:15673 (guest / guest)
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      retries: 30
-    labels:
-      happyheadlines.c4: Message broker
-      happyheadlines.description: "RabbitMQ: carries the MassTransit messages between the services"
+  # --- Traffic ---------------------------------------------------------------------------------
 
   reader-simulator:
     build: { context: ., args: { SERVICE: ReaderSimulator } }
     image: happyheadlines/reader-simulator
     environment:
       ArticleService: http://article-lb
-      RabbitMq: rabbitmq
+      CommentService: http://comment-service:8080
       Readers: "5"
     depends_on:
       article-lb: { condition: service_started }
