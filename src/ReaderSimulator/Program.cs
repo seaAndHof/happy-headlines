@@ -1,6 +1,8 @@
+using HappyHeadlines.Shared;
 using ReaderSimulator;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.AddObservability("ReaderSimulator");
 var config = builder.Configuration;
 
 // ArticleService through its load balancer, like the Website would; CommentService directly.

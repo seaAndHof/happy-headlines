@@ -1,4 +1,5 @@
 using CommentService;
+using HappyHeadlines.Shared;
 using Microsoft.Extensions.Http.Resilience;
 using Npgsql;
 using Polly;
@@ -6,6 +7,7 @@ using Prometheus;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddObservability("CommentService");
 var config = builder.Configuration;
 
 builder.Services.AddSingleton(NpgsqlDataSource.Create(config["CommentDatabase"]!));

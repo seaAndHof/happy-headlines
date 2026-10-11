@@ -20,6 +20,11 @@ x-continent-db-env: &continent-db-env
   POSTGRES_PASSWORD: headlines
   POSTGRES_DB: articles
 
+# Where every .NET service sends its logs (Seq) and traces (Jaeger, over OTLP).
+x-observability: &observability
+  Seq: http://seq:5341
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+
 x-redis-health: &redis-health
   test: ["CMD", "redis-cli", "ping"]
   interval: 2s
@@ -89,6 +94,7 @@ services:
     deploy:
       replicas: 3 # x-axis split: three identical clones behind article-lb
     environment:
+      <<: *observability
       ArticleCache: article-cache:6379 # the eight ArticleDatabases are in src/ArticleService/appsettings.json
     depends_on:
       transatlantic-link-setup: { condition: service_completed_successfully }
@@ -120,6 +126,7 @@ services:
     build: { context: ., args: { SERVICE: ArticleCacheWarmer } }
     image: happyheadlines/article-cache-warmer
     environment:
+      <<: *observability
       ArticleDatabase: Host=transatlantic-link;Port=5432;Database=articles;Username=happy;Password=headlines;GSS Encryption Mode=Disable
       ArticleCache: article-cache:6379
       RefreshInterval: "00:01:00"
@@ -158,6 +165,7 @@ services:
     deploy:
       replicas: 2
     environment:
+      <<: *observability
       CommentDatabase: Host=transatlantic-link;Port=5433;Database=comments;Username=happy;Password=headlines;GSS Encryption Mode=Disable
       CommentCache: comment-cache:6379
       CommentCacheMaxArticles: "30"
@@ -189,6 +197,7 @@ services:
     build: { context: ., args: { SERVICE: ProfanityService } }
     image: happyheadlines/profanity-service
     environment:
+      <<: *observability
       ProfanityDatabase: Host=profanity-db;Database=profanity;Username=happy;Password=headlines;GSS Encryption Mode=Disable
     depends_on:
       profanity-db: { condition: service_healthy }
@@ -240,6 +249,7 @@ services:
     build: { context: ., args: { SERVICE: ReaderSimulator } }
     image: happyheadlines/reader-simulator
     environment:
+      <<: *observability
       ArticleService: http://article-lb
       CommentService: http://comment-service:8080
       Readers: "5"
@@ -251,6 +261,25 @@ services:
       happyheadlines.description: ".NET: simulated readers requesting articles and comments, and posting comments"
 
   # --- Monitoring -------------------------------------------------------------------------------
+
+  seq:
+    image: datalust/seq:latest
+    ports:
+      - "5342:80" # logs: http://localhost:5342
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+    labels:
+      happyheadlines.c4: Monitoring
+      happyheadlines.description: "Seq: the central log store for every service"
+
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    ports:
+      - "16686:16686" # traces: http://localhost:16686
+    labels:
+      happyheadlines.c4: Monitoring
+      happyheadlines.description: "Jaeger: collects the distributed traces from every service (OTLP)"
 
   prometheus:
     image: prom/prometheus:latest

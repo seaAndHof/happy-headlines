@@ -1,8 +1,10 @@
 using ArticleService;
+using HappyHeadlines.Shared;
 using Prometheus;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddObservability("ArticleService");
 var config = builder.Configuration;
 
 builder.Services.AddSingleton<ArticleDatabaseCoordinator>();

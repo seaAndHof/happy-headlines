@@ -3,6 +3,7 @@ using HappyHeadlines.Shared;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddObservability("ProfanityService");
 builder.Services.AddSingleton(NpgsqlDataSource.Create(builder.Configuration["ProfanityDatabase"]!));
 
 var app = builder.Build();
