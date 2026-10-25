@@ -1,0 +1,48 @@
+# Continuous delivery: when CI has passed on main, every service is built into a Docker image and pushed to the
+# GitHub Container Registry, tagged with a version number (1.0.<CI run number>) and "latest".
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deliver:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [ArticleService, ArticleCacheWarmer, CommentService, ProfanityService, ReaderSimulator]
+    env:
+      VERSION: 1.0.${{ github.event.workflow_run.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }} # exactly the commit CI tested
+
+      - name: Image name
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          service=$(echo "${{ matrix.service }}" | sed -E 's/([a-z])([A-Z])/\1-\2/g' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/$owner/happyheadlines-$service" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-args: SERVICE=${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest

@@ -1,0 +1,27 @@
+# Continuous integration: every push and pull request to main is built and tested.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore HappyHeadlines.sln
+
+      - name: Build
+        run: dotnet build HappyHeadlines.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --solution HappyHeadlines.sln --configuration Release --no-build
