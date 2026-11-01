@@ -205,6 +205,68 @@ services:
       happyheadlines.c4: ProfanityService
       happyheadlines.description: ".NET REST API: masks profanity in a text"
 
+  # --- Subscribers and the newsletter (two swimlanes, decoupled by the SubscriberQueue) ---------
+
+  subscriber-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: happy
+      POSTGRES_PASSWORD: headlines
+      POSTGRES_DB: subscribers
+    volumes:
+      - ./db/subscriber-db.sql:/docker-entrypoint-initdb.d/subscriber-db.sql:ro
+    healthcheck: *postgres-health
+    labels:
+      happyheadlines.c4: SubscriberDatabase
+      happyheadlines.description: "PostgreSQL: newsletter subscribers"
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "15673:15672" # management UI: http://localhost:15673 (guest / guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 30
+    labels:
+      happyheadlines.c4: SubscriberQueue
+      happyheadlines.description: "RabbitMQ: new subscribers, on their way from SubscriberService to NewsletterService"
+
+  subscriber-service:
+    build: { context: ., args: { SERVICE: SubscriberService } }
+    image: happyheadlines/subscriber-service
+    environment:
+      <<: *observability
+      SubscriberDatabase: Host=subscriber-db;Database=subscribers;Username=happy;Password=headlines;GSS Encryption Mode=Disable
+      RabbitMq: rabbitmq
+      DOTNET_USE_POLLING_FILE_WATCHER: "true" # notice edits to features.json through the bind mount
+    volumes:
+      - ./features:/features:ro
+    depends_on:
+      subscriber-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: SubscriberService
+      happyheadlines.description: ".NET REST API: subscribe and unsubscribe; behind the SubscriberService release toggle"
+
+  newsletter-service:
+    build: { context: ., args: { SERVICE: NewsletterService } }
+    image: happyheadlines/newsletter-service
+    environment:
+      <<: *observability
+      ArticleService: http://article-lb
+      SubscriberService: http://subscriber-service:8080
+      RabbitMq: rabbitmq
+      NewsletterInterval: "00:01:00" # every minute for the demo; daily in production
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
+    volumes:
+      - ./features:/features:ro
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    labels:
+      happyheadlines.c4: NewsletterService
+      happyheadlines.description: ".NET: sends the newsletter, and a welcome mail to every new subscriber"
+
   # --- Europe <-> North America -----------------------------------------------------------------
 
   transatlantic-link:
@@ -252,10 +314,12 @@ services:
       <<: *observability
       ArticleService: http://article-lb
       CommentService: http://comment-service:8080
+      SubscriberService: http://subscriber-service:8080
       Readers: "5"
     depends_on:
       article-lb: { condition: service_started }
       comment-service: { condition: service_started }
+      subscriber-service: { condition: service_started }
     labels:
       happyheadlines.c4: Website (simulated)
       happyheadlines.description: ".NET: simulated readers requesting articles and comments, and posting comments"

@@ -15,6 +15,7 @@ public class Readers(IHttpClientFactory http, IConfiguration config, ILogger<Rea
     {
         var articles = http.CreateClient("ArticleService");
         var comments = http.CreateClient("CommentService");
+        var subscribers = http.CreateClient("SubscriberService");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -31,6 +32,12 @@ public class Readers(IHttpClientFactory http, IConfiguration config, ILogger<Rea
                     (await comments.PostAsJsonAsync("comments", new NewComment(articleId, "Reader", body), stoppingToken))
                         .EnsureSuccessStatusCode();
                 }
+
+                // Now and then a reader subscribes to the newsletter. While the SubscriberService toggle is off,
+                // this gets a 404, which is expected and not a failure.
+                if (Random.Shared.NextDouble() < 0.01)
+                    await subscribers.PostAsJsonAsync(
+                        "subscribers", new NewSubscriber($"reader-{Guid.NewGuid():N}@example.com"), stoppingToken);
             }
             catch (HttpRequestException e)
             {
