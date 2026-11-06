@@ -37,10 +37,14 @@ public class ArticleCacheRefresher(
             WHERE published_at >= now() - interval '14 days'
             """)).ToList();
 
+        // GAF tactic "Bulk Fetch Data": all writes go to Redis together in one batch, instead of one round trip each.
         var timer = Stopwatch.StartNew();
-        var redis = cache.GetDatabase();
-        foreach (var article in articles)
-            await redis.StringSetAsync(CacheKeys.Article(article.Id), JsonSerializer.Serialize(article), entryLifetime);
+        var batch = cache.GetDatabase().CreateBatch();
+        var writes = articles
+            .Select(article => batch.StringSetAsync(CacheKeys.Article(article.Id), JsonSerializer.Serialize(article), entryLifetime))
+            .ToList();
+        batch.Execute();
+        await Task.WhenAll(writes);
 
         logger.LogInformation("ArticleCache refreshed with {Count} articles from the last 14 days; writing them took {WriteMs:0.0} ms",
             articles.Count, timer.Elapsed.TotalMilliseconds);
