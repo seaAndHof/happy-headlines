@@ -6,6 +6,7 @@ using Npgsql;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
+using Serilog.Events;
 
 namespace HappyHeadlines.Shared;
 
@@ -19,8 +20,13 @@ public static class Observability
     {
         var seq = builder.Configuration["Seq"] ?? "http://seq:5341";
 
+        // GAF tactic "Reduce Logging": the framework logged every request several times over (ASP.NET Core hosting,
+        // routing and results; HttpClient handlers). Jaeger already records every request as a trace, so the framework
+        // only logs warnings and errors; our own Information logs stay.
         builder.Services.AddSerilog(logging => logging
             .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .Enrich.WithProperty("Service", serviceName)
             .WriteTo.Console()
