@@ -1,6 +1,6 @@
 # HappyHeadlines
 
-The semester project in Development of Large Systems: a positive-news system built week by week, from the AKF scale cube to fault isolation, monitoring, CI/CD, release toggles and green software.
+Development of Large Systems project - a positiv news system. 
 
 Everything runs in Docker:
 
