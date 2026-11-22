@@ -1,84 +1,96 @@
 workspace "HappyHeadlines" "C4 model of the HappyHeadlines system (Development of Large Systems, E2026)." {
 
     model {
-        Publisher = person "Publisher" "Journalist who writes articles for HappyHeadlines."
-        Reader = person "Reader" "Reads, comments on and subscribes to positive news."
+        Publisher = person "Publisher" "Journalist who writes articles."
+        Reader = person "Reader" "Reads, comments and subscribes."
 
         HappyHeadlines = softwareSystem "HappyHeadlines" "Positive news from around the world, with comments and a daily newsletter." {
-            Webapp = container "Webapp" "" "Where publishers write drafts and publish articles." "WebBrowser,NotBuilt"
-            Website = container "Website" "" "Shows the most recent articles, with one highlighted." "WebBrowser,NotBuilt"
+            Website = container "Website" "Simulated by reader-simulator" "Recent articles, comments and newsletter sign-up." "WebBrowser,Frontend"
 
-            DraftService = container "DraftService" "REST API" "Saves and loads drafts." "Service,NotBuilt"
-            DraftDatabase = container "DraftDatabase" "" "Stores drafts." "Database,NotBuilt"
-            PublisherService = container "PublisherService" "REST API" "Publishes finished articles." "Service,NotBuilt"
-            ArticleQueue = container "ArticleQueue" "" "Published articles on their way to the ArticleDatabase." "Queue,NotBuilt"
-
-            ArticleLoadBalancer = container "Article load balancer" "nginx" "X-axis: spreads requests round robin over the ArticleService replicas." "LoadBalancer"
-            ArticleService = container "ArticleService ×3" ".NET REST API" "Article CRUD per continent. Three identical, stateless replicas." "Service" {
-                ArticleEndpoints = component "Article endpoints" "ASP.NET Core minimal API" "REST CRUD under /articles/{continent}/{id}."
-                Coordinator = component "ArticleDatabase Coordinator" "C#" "Z-axis coordination: hands out the database of the requested continent (one connection pool each)."
-                CacheClient = component "ArticleCache client" "StackExchange.Redis" "Global reads look in the cache first; edits and deletes remove the cached copy."
-                CacheMetrics = component "Cache metrics" "prometheus-net" "Counts hits and misses and their duration; serves /metrics."
-                Observability = component "Observability" "Serilog, OpenTelemetry" "Sends logs to Seq and traces to Jaeger."
+            # Each group is a swimlane: its own services and its own data, nothing shared.
+            group "Subscribers" {
+                SubscriberService = container "SubscriberService" ".NET REST API" "Subscribe and unsubscribe. Behind a release toggle." "Service,Subscribers"
+                SubscriberDatabase = container "SubscriberDatabase" "PostgreSQL" "All subscribers." "Database,Subscribers"
+                SubscriberQueue = container "SubscriberQueue" "RabbitMQ" "New subscribers." "Queue,Subscribers"
             }
-            ArticleCache = container "ArticleCache" "Redis" "Global articles from the last 14 days." "Database"
-            ArticleCacheWarmer = container "ArticleCacheWarmer" ".NET worker" "Offline process: copies the last 14 days of global articles into the ArticleCache every minute." "Service"
-            GlobalArticleDatabase = container "ArticleDatabase (global)" "PostgreSQL" "News for the whole world. In North America." "Database"
-            ContinentArticleDatabases = container "ArticleDatabase ×7 (continents)" "PostgreSQL" "One database per continent (z-axis split)." "Database"
 
-            CommentService = container "CommentService ×2" ".NET REST API" "Reads and stores comments; new comments pass the ProfanityService." "Service"
-            CommentCache = container "CommentCache" "Redis" "Comments of the 30 most recently read articles (LRU)." "Database"
-            CommentDatabase = container "CommentDatabase" "PostgreSQL" "All comments." "Database"
-            ProfanityService = container "ProfanityService" ".NET REST API" "Masks profanity in a text." "Service"
-            ProfanityDatabase = container "ProfanityDatabase" "PostgreSQL" "The words to mask." "Database"
+            group "Newsletter" {
+                NewsletterService = container "NewsletterService" ".NET worker" "Daily newsletter and welcome mails." "Service,Newsletter"
+            }
 
-            SubscriberService = container "SubscriberService" ".NET REST API" "Subscribe and unsubscribe. Hidden behind a release toggle." "Service"
-            SubscriberDatabase = container "SubscriberDatabase" "PostgreSQL" "All subscribers." "Database"
-            SubscriberQueue = container "SubscriberQueue" "RabbitMQ" "New subscribers." "Queue"
-            NewsletterService = container "NewsletterService" ".NET worker" "Sends the daily newsletter, and a welcome mail to new subscribers." "Service"
+            group "Articles" {
+                ArticleLoadBalancer = container "Load balancer" "nginx" "Round robin over the ArticleService replicas (x-axis)." "LoadBalancer,Articles"
+                ArticleService = container "ArticleService ×3" ".NET REST API" "Article CRUD per continent." "Service,Articles" {
+                    ArticleEndpoints = component "Article endpoints" "ASP.NET Core minimal API" "REST CRUD under /articles/{continent}/{id}."
+                    Coordinator = component "ArticleDatabase Coordinator" "C#" "Z-axis coordination: hands out the database of the requested continent (one connection pool each)."
+                    CacheClient = component "ArticleCache client" "StackExchange.Redis" "Global reads look in the cache first; edits and deletes remove the cached copy."
+                    CacheMetrics = component "Cache metrics" "prometheus-net" "Counts hits and misses and their duration; serves /metrics."
+                    Observability = component "Observability" "Serilog, OpenTelemetry" "Sends logs to Seq and traces to Jaeger."
+                }
+                ArticleCache = container "ArticleCache" "Redis" "Global articles from the last 14 days." "Database,Articles"
+                ArticleCacheWarmer = container "ArticleCacheWarmer" ".NET worker" "Refills the ArticleCache every minute." "Service,Articles"
+                ArticleDatabases = container "ArticleDatabase ×8" "PostgreSQL" "7 continents + 1 global (z-axis split)." "Database,Articles"
+            }
+
+            group "Comments" {
+                CommentService = container "CommentService ×2" ".NET REST API" "Reads and stores comments." "Service,Comments"
+                CommentCache = container "CommentCache" "Redis" "Comments of the 30 most recently read articles (LRU)." "Database,Comments"
+                CommentDatabase = container "CommentDatabase" "PostgreSQL" "All comments." "Database,Comments"
+            }
+
+            group "Profanity" {
+                ProfanityService = container "ProfanityService" ".NET REST API" "Masks profanity in a text." "Service,Profanity"
+                ProfanityDatabase = container "ProfanityDatabase" "PostgreSQL" "The words to mask." "Database,Profanity"
+            }
+
+            group "Publishing (designed, not built)" {
+                Webapp = container "Webapp" "" "Write drafts and publish articles." "WebBrowser,NotBuilt"
+                DraftService = container "DraftService" "REST API" "Saves and loads drafts." "Service,NotBuilt"
+                DraftDatabase = container "DraftDatabase" "" "Drafts." "Database,NotBuilt"
+                PublisherService = container "PublisherService" "REST API" "Publishes finished articles." "Service,NotBuilt"
+                ArticleQueue = container "ArticleQueue" "" "Newly published articles." "Queue,NotBuilt"
+            }
 
             Monitoring = container "Monitoring" "Seq, Jaeger, Prometheus, Grafana" "Central logs, distributed traces, metrics and dashboards." "Monitoring"
         }
 
         # Publishing
-        Publisher -> Webapp "Writes and publishes articles"
-        Webapp -> DraftService "Saves and loads drafts"
-        DraftService -> DraftDatabase "Stores drafts"
-        Webapp -> PublisherService "Publishes an article"
-        PublisherService -> ProfanityService "Filters profanity"
-        PublisherService -> ArticleQueue "Puts the published article"
-        ArticleService -> ArticleQueue "Takes new articles"
+        Publisher -> Webapp "Writes articles"
+        Webapp -> DraftService "Saves drafts"
+        DraftService -> DraftDatabase "Stores"
+        Webapp -> PublisherService "Publishes"
+        PublisherService -> ProfanityService "Checks profanity"
+        PublisherService -> ArticleQueue "Queues article"
+        ArticleQueue -> ArticleService "New articles"
 
         # Reading
-        Reader -> Website "Reads, comments and subscribes"
-        Website -> ArticleLoadBalancer "Gets articles" "HTTP"
-        ArticleLoadBalancer -> ArticleService "Forwards, round robin" "HTTP"
-        ArticleService -> ArticleCache "Reads global articles first"
-        ArticleService -> GlobalArticleDatabase "Reads and writes global articles"
-        ArticleService -> ContinentArticleDatabases "Reads and writes each continent's articles"
-        ArticleCacheWarmer -> GlobalArticleDatabase "Reads the last 14 days"
-        ArticleCacheWarmer -> ArticleCache "Fills, every minute"
+        Reader -> Website "Uses"
+        Website -> ArticleLoadBalancer "Reads articles"
+        ArticleLoadBalancer -> ArticleService "Round robin"
+        ArticleService -> ArticleCache "Global: cache first"
+        ArticleService -> ArticleDatabases "Reads and writes"
+        ArticleCacheWarmer -> ArticleDatabases "Last 14 days"
+        ArticleCacheWarmer -> ArticleCache "Fills"
 
         # Commenting
-        Website -> CommentService "Posts and reads comments" "HTTP"
-        CommentService -> CommentCache "Reads comments first"
-        CommentService -> CommentDatabase "Stores and reads comments"
-        CommentService -> ProfanityService "Filters profanity (circuit breaker)" "HTTP"
-        ProfanityService -> ProfanityDatabase "Reads the words"
+        Website -> CommentService "Reads and posts comments"
+        CommentService -> CommentCache "Cache first"
+        CommentService -> CommentDatabase "Reads and writes"
+        CommentService -> ProfanityService "Filters (circuit breaker)"
+        ProfanityService -> ProfanityDatabase "Reads words"
 
         # Subscribing
-        Website -> SubscriberService "Subscribes and unsubscribes" "HTTP"
-        SubscriberService -> SubscriberDatabase "Stores subscribers"
-        SubscriberService -> SubscriberQueue "Puts new subscribers"
-        NewsletterService -> SubscriberQueue "Takes new subscribers, sends a welcome mail" "AMQP"
-        NewsletterService -> SubscriberService "Gets all subscribers (if the toggle is on)" "HTTP"
-        NewsletterService -> ArticleLoadBalancer "Gets recent articles" "HTTP"
+        Website -> SubscriberService "Subscribes"
+        SubscriberService -> SubscriberDatabase "Stores"
+        SubscriberService -> SubscriberQueue "New subscriber"
+        SubscriberQueue -> NewsletterService "Welcome mail"
+        NewsletterService -> SubscriberService "Gets subscribers (toggle)"
+        NewsletterService -> ArticleLoadBalancer "Recent articles"
 
         # Inside ArticleService (level 3)
-        ArticleLoadBalancer -> ArticleEndpoints "Forwards, round robin" "HTTP"
+        ArticleLoadBalancer -> ArticleEndpoints "Round robin" "HTTP"
         ArticleEndpoints -> Coordinator "Asks for the continent's database"
-        Coordinator -> GlobalArticleDatabase "global"
-        Coordinator -> ContinentArticleDatabases "africa, antarctica, asia, europe, north-america, oceania, south-america"
+        Coordinator -> ArticleDatabases "One connection pool per database"
         ArticleEndpoints -> CacheClient "Global articles: cache first"
         CacheClient -> ArticleCache "GET / DEL article:{id}"
         ArticleEndpoints -> CacheMetrics "Records hit or miss"
@@ -93,11 +105,12 @@ workspace "HappyHeadlines" "C4 model of the HappyHeadlines system (Development o
             autoLayout lr
         }
 
-        container HappyHeadlines "Containers" "Level 2: the containers of HappyHeadlines. Dashed: designed, not built in this project." {
+        container HappyHeadlines "Containers" "Level 2: HappyHeadlines, one colour per swimlane." {
             include *
             exclude Monitoring
-            autoLayout lr
+            autoLayout tb 200 120
         }
+
 
         component ArticleService "ArticleService-Components" "Level 3: inside ArticleService." {
             include *
@@ -107,19 +120,18 @@ workspace "HappyHeadlines" "C4 model of the HappyHeadlines system (Development o
         styles {
             element "Element" {
                 color #ffffff
+                stroke #ffffff
+                strokeWidth 4
             }
             element "Person" {
-                background #9b191f
+                background #37474f
                 shape person
             }
             element "Software System" {
-                background #ba1e25
-            }
-            element "Container" {
-                background #d9232b
+                background #37474f
             }
             element "Component" {
-                background #e66c5a
+                background #e57373
             }
             element "Service" {
                 shape hexagon
@@ -133,15 +145,60 @@ workspace "HappyHeadlines" "C4 model of the HappyHeadlines system (Development o
             element "WebBrowser" {
                 shape WebBrowser
             }
-            element "LoadBalancer" {
-                background #b0464b
+            element "Frontend" {
+                background #607d8b
             }
-            element "Monitoring" {
-                background #6b6b6b
+
+            element "Articles" {
+                background #c62828
+            }
+            element "Comments" {
+                background #ef6c00
+            }
+            element "Profanity" {
+                background #ad1457
+            }
+            element "Subscribers" {
+                background #6a1b9a
+            }
+            element "Newsletter" {
+                background #1565c0
+            }
+            element "LoadBalancer" {
+                background #8e1c1c
             }
             element "NotBuilt" {
-                background #c9a3a5
+                background #bdbdbd
                 border dashed
+            }
+            element "Monitoring" {
+                background #546e7a
+            }
+
+            element "Group:Articles" {
+                color #c62828
+            }
+            element "Group:Comments" {
+                color #ef6c00
+            }
+            element "Group:Profanity" {
+                color #ad1457
+            }
+            element "Group:Subscribers" {
+                color #6a1b9a
+            }
+            element "Group:Newsletter" {
+                color #1565c0
+            }
+            element "Group:Publishing (designed, not built)" {
+                color #9e9e9e
+            }
+
+            relationship "Relationship" {
+                color #616161
+                thickness 3
+                style solid
+                fontSize 26
             }
         }
     }

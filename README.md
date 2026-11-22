@@ -33,7 +33,7 @@ The model is [`docs/workspace.dsl`](docs/workspace.dsl) (Structurizr). To browse
 docker run --rm -p 8090:8080 -v ./docs:/usr/local/structurizr structurizr/structurizr local   # http://localhost:8090
 ```
 
-Dashed containers are part of the design but not built here: Webapp, Website, DraftService/DraftDatabase, PublisherService and ArticleQueue. The reader simulator stands in for the Website.
+Each colour is a swimlane: its own services and its own data, nothing shared. The grey group (Webapp, DraftService/DraftDatabase, PublisherService, ArticleQueue) is part of the design but not built here, and the reader simulator stands in for the Website.
 
 ## How the requirements are covered
 
