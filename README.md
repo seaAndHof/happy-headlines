@@ -41,7 +41,7 @@ Each colour is a swimlane: its own services and its own data, nothing shared. Th
 |---|---|---|
 | W35 | C4 diagrams (levels 1–2), plus level 3 of ArticleService | [`docs/workspace.dsl`](docs/workspace.dsl) |
 | W36 | ArticleService: REST CRUD | [`ArticleEndpoints`](src/ArticleService/ArticleEndpoints.cs) |
-| W36 | X-axis: 3 ArticleService replicas behind a load balancer | `deploy.replicas` in [`compose.yaml`](compose.yaml); [`article-lb.conf`](network/article-lb.conf) |
+| W36 | X-axis: 3 ArticleService replicas behind a load balancer | `deploy.replicas` in [`compose.yaml`](compose.yaml); [`article-lb.Caddyfile`](network/article-lb.Caddyfile) |
 | W36 | Z-axis: one ArticleDatabase per continent plus a global one | [`ArticleDatabaseCoordinator`](src/ArticleService/ArticleDatabaseCoordinator.cs); [`appsettings.json`](src/ArticleService/appsettings.json); [`continent-db.sh`](db/continent-db.sh) |
 | W37 | CommentService and ProfanityService, each with its own database, calling each other directly | [`CommentEndpoints`](src/CommentService/CommentEndpoints.cs); [`ProfanityService`](src/ProfanityService/Program.cs) |
 | W37 | Circuit breaker in CommentService for when ProfanityService is unavailable | [`CommentService/Program.cs`](src/CommentService/Program.cs) (Polly); fallback in [`ProfanityClient`](src/CommentService/ProfanityClient.cs) |
@@ -58,7 +58,7 @@ Every container carries `happyheadlines.c4` and `happyheadlines.description` lab
 
 | Container | C4 container | What it does |
 |---|---|---|
-| `article-lb` | Load balancer | nginx: spreads requests round robin over the ArticleService replicas |
+| `article-lb` | Load balancer | Caddy: spreads requests round robin over the ArticleService replicas |
 | `article-service` ×3 | ArticleService | REST CRUD under `/articles/{continent}/{id}`; global reads go through the ArticleCache |
 | `article-db` | ArticleDatabase (global) | PostgreSQL in North America: 300 articles, behind `transatlantic-link` |
 | `article-db-<continent>` ×7 | ArticleDatabase (continent) | PostgreSQL: a few articles per continent |
@@ -90,15 +90,15 @@ curl localhost:8081/articles/asia/1     # "Good news from asia #1": same id, ano
 curl -X POST localhost:8081/articles/oceania -H 'Content-Type: application/json' -d '{"title": "Reef recovers", "content": "Coral is back."}'
 ```
 
-**X-axis (cloning).** Three identical, stateless ArticleService replicas run behind nginx. All their state lives in the databases and the ArticleCache, so any replica can answer any request.
-- **Finding the replicas:** Docker's DNS answers `article-service` with one address per replica. nginx re-resolves the name every 5 seconds, so scaling up or down is picked up.
+**X-axis (cloning).** Three identical, stateless ArticleService replicas run behind a Caddy load balancer ([`article-lb.Caddyfile`](network/article-lb.Caddyfile)). All their state lives in the databases and the ArticleCache, so any replica can answer any request.
+- **Finding the replicas:** Docker's DNS answers `article-service` with one address per replica. Caddy asks again every 5 seconds, so scaling up or down is picked up.
 - **Spreading the load:** requests go round robin.
-- **Failures:** a replica that fails 3 times within 10 seconds is left out for 10 seconds, and a request that hits a dead replica is retried on the next one (never for POST).
+- **Failures:** if a replica can't be reached within 0.5 seconds, the request goes to the next one, and the failing replica is left out for 10 seconds.
 - **Which replica answered:** the `X-Upstream` header says.
 
 ```sh
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null -D - localhost:8081/articles/europe/1 | grep X-Upstream; done
-docker compose up -d --scale article-service=5   # nginx picks up the new replicas
+docker compose up -d --scale article-service=5   # Caddy picks up the new replicas
 ```
 
 ## Fault isolation
@@ -122,7 +122,7 @@ docker compose start profanity-service   # after 15 s: "half-open", then "closed
 ## Design to be monitored
 
 - **Logs:** every service uses Serilog through [`Observability`](src/HappyHeadlines.Shared/Observability.cs) and writes to Seq, tagged with `Service`. Filter on `Service = 'CommentService'` or on a `TraceId`.
-- **Traces:** OpenTelemetry instruments ASP.NET Core, HttpClient, Npgsql and MassTransit and exports to Jaeger. The `traceparent` header carries a trace across services (through nginx too) and RabbitMQ messages, so one reader request is one trace. A global article read from the cache has no `postgresql` span; a miss has one of about 100 ms (the Atlantic).
+- **Traces:** OpenTelemetry instruments ASP.NET Core, HttpClient, Npgsql and MassTransit and exports to Jaeger. The `traceparent` header carries a trace across services (through the load balancer too) and RabbitMQ messages, so one reader request is one trace. A global article read from the cache has no `postgresql` span; a miss has one of about 100 ms (the Atlantic).
 - **Metrics:** cache hits, misses, lookup time and evictions per replica, scraped by Prometheus and shown in Grafana. The per-replica panel also shows the load balancer spreading the reads.
 
 ## CI/CD

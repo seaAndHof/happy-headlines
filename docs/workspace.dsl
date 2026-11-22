@@ -19,7 +19,7 @@ workspace "HappyHeadlines" "C4 model of the HappyHeadlines system (Development o
             }
 
             group "Articles" {
-                ArticleLoadBalancer = container "Load balancer" "nginx" "Round robin over the ArticleService replicas (x-axis)." "LoadBalancer,Articles"
+                ArticleLoadBalancer = container "Load balancer" "Caddy" "Round robin over the ArticleService replicas (x-axis)." "LoadBalancer,Articles"
                 ArticleService = container "ArticleService ×3" ".NET REST API" "Article CRUD per continent." "Service,Articles" {
                     ArticleEndpoints = component "Article endpoints" "ASP.NET Core minimal API" "REST CRUD under /articles/{continent}/{id}."
                     Coordinator = component "ArticleDatabase Coordinator" "C#" "Z-axis coordination: hands out the database of the requested continent (one connection pool each)."
