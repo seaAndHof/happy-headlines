@@ -24,7 +24,7 @@ public static class ArticleEndpoints
 
     private static async Task<IResult> GetRecent(string continent, ArticleDatabaseCoordinator coordinator, int days = 1)
     {
-        if (!coordinator.TryGetDatabase(continent, out var database))
+        if (coordinator.GetDatabase(continent) is not { } database)
             return Results.NotFound($"Unknown continent '{continent}'");
 
         await using var connection = await database.OpenConnectionAsync();
@@ -37,7 +37,7 @@ public static class ArticleEndpoints
     private static async Task<IResult> Get(
         string continent, int id, ArticleDatabaseCoordinator coordinator, IConnectionMultiplexer cache, HttpResponse response)
     {
-        if (!coordinator.TryGetDatabase(continent, out var database))
+        if (coordinator.GetDatabase(continent) is not { } database)
             return Results.NotFound($"Unknown continent '{continent}'");
 
         if (continent != ArticleDatabaseCoordinator.Global)
@@ -78,7 +78,7 @@ public static class ArticleEndpoints
 
     private static async Task<IResult> Create(string continent, ArticleInput input, ArticleDatabaseCoordinator coordinator)
     {
-        if (!coordinator.TryGetDatabase(continent, out var database))
+        if (coordinator.GetDatabase(continent) is not { } database)
             return Results.NotFound($"Unknown continent '{continent}'");
 
         await using var connection = await database.OpenConnectionAsync();
@@ -91,7 +91,7 @@ public static class ArticleEndpoints
     private static async Task<IResult> Update(
         string continent, int id, ArticleInput input, ArticleDatabaseCoordinator coordinator, IConnectionMultiplexer cache)
     {
-        if (!coordinator.TryGetDatabase(continent, out var database))
+        if (coordinator.GetDatabase(continent) is not { } database)
             return Results.NotFound($"Unknown continent '{continent}'");
 
         await using var connection = await database.OpenConnectionAsync();
@@ -105,7 +105,7 @@ public static class ArticleEndpoints
     private static async Task<IResult> Delete(
         string continent, int id, ArticleDatabaseCoordinator coordinator, IConnectionMultiplexer cache)
     {
-        if (!coordinator.TryGetDatabase(continent, out var database))
+        if (coordinator.GetDatabase(continent) is not { } database)
             return Results.NotFound($"Unknown continent '{continent}'");
 
         await using var connection = await database.OpenConnectionAsync();

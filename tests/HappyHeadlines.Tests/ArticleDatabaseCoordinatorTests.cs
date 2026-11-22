@@ -21,20 +21,17 @@ public class ArticleDatabaseCoordinatorTests
     [InlineData("global")]
     public void Routes_each_continent_to_its_own_database(string continent)
     {
-        Assert.True(Coordinator.TryGetDatabase(continent, out var database));
+        var database = Coordinator.GetDatabase(continent);
+
+        Assert.NotNull(database);
         Assert.Contains($"Host=db-{continent}", database.ConnectionString);
     }
 
-    [Fact]
-    public void Continent_names_are_case_insensitive()
+    [Theory]
+    [InlineData("atlantis")]
+    [InlineData("Europe")] // names match exactly, so "GLOBAL" can't slip past the ArticleCache
+    public void Rejects_an_unknown_continent(string continent)
     {
-        Assert.True(Coordinator.TryGetDatabase("Europe", out var database));
-        Assert.Contains("Host=db-europe", database.ConnectionString);
-    }
-
-    [Fact]
-    public void Rejects_an_unknown_continent()
-    {
-        Assert.False(Coordinator.TryGetDatabase("atlantis", out _));
+        Assert.Null(Coordinator.GetDatabase(continent));
     }
 }
